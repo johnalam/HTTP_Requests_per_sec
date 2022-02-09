@@ -1,0 +1,103 @@
+when RULE_INIT {
+    # This defines the maximum requests per second to be served within the timing interval defined by the static::timeout variable below.
+    set static::maxReqs 100
+
+   set static::timeout 10
+   set static::lifetime 30
+   # this version uses the "timeout -remaining" timestamp in millisecond.  It uses this timestamp to decide
+   # when to reset a record.  Set this to 1 to throttle per second.  Setting this to larger than one increses
+   # the potential of overwhelming application during that time.
+   # The lifetime is only used to make sure the record is eventually purged in cases when the user stops sending
+   # requests.  This should never be used because the timeout will purge the record first.
+}
+
+when HTTP_REQUEST {
+  # The iRule allows throttling for only sepecific Methods.  You list the Methods_to_throttle
+  # in a datagroup.
+  # If you need to throttle by URI use an statement like this:
+  #                               if { [class match [HTTP::uri] equals URIs_to_throttle] }
+  # Note: a URI is everything after the hostname: e.g. /path1/login.aspx?name=user1
+  #
+
+  #if { [class match [HTTP::method] equals Methods_to_throttle] } {
+
+     # The following expects the IP addresses in multiple X-forwarded-for headers.  It picks the first one.
+     if { [HTTP::header exists X-forwarded-for] } {
+        set client_IP_addr [getfield [lindex  [HTTP::header values X-Forwarded-For]  0] "," 1]
+     } else {
+        set client_IP_addr [IP::client_addr]
+     }
+     set X_client_IP_addr "X"
+     set X_client_IP_addr "$client_IP_addr$X_client_IP_addr"
+
+     # The matching below expects a datagroup named: Throttling_Allowed_IPs
+     # The Condition of the if statement is true if the IP address is * NOT * in the Allowed ist.
+     #if { not ([class match $client_IP_addr equals Throttling_Allowed_IPs ] )} {
+
+         #  The throttling part Starts Here
+
+        set getcount [table lookup -notouch $client_IP_addr]
+        set epocNow [clock clicks -milliseconds]
+        set firstRequestTimeStamp 0
+        set msecSince 0
+        if { $getcount equals "" } {
+                table set $client_IP_addr "0" $static::timeout $static::lifetime
+                table set $X_client_IP_addr $epocNow $static::timeout $static::timeout
+        } else {
+             set firstRequestTimeStamp [table lookup -notouch $X_client_IP_addr]
+#             log local0. "A- $client_IP_addr -- $X_client_IP_addr [table lookup -notouch $X_client_IP_addr]"
+
+            if {$firstRequestTimeStamp eq ""} {
+                          set firstRequestTimeStamp 0
+                          set msecSince 0
+            } else {
+                          set msecSince [expr $epocNow - $firstRequestTimeStamp]
+            }
+        }
+        log local0. "B- $client_IP_addr - $getcount - $epocNow - $firstRequestTimeStamp - $msecSince ***"
+
+        set response "Reqs this session: [HTTP::request_num]    Total Reqs per second $getcount     Msec since barrage started $msecSince"
+        if { $msecSince < 1000 } {
+
+                        # Refresh or start a new record
+                        # check if 1000msec have elapsed since last request from IP address (+or- 10 msec)
+                        log local0. "C- $client_IP_addr - $getcount - $msecSince"
+                        if { $getcount > $static::maxReqs } {
+                            # record of this session does not exist, starting new record, request is allowed.
+
+                            log local0. "E- Denying Request for $client_IP_addr : $getcount"
+                            HTTP::respond 403 -version 1.1 content "Denied : $response\n"
+                            return
+                        } else {
+
+                            # If less that 1000msec have so far elapsed, request count should be less than max allowed.
+
+                                log local0. "D- Allowed Requests for $client_IP_addr :  $getcount in $msecSince msec"
+                                table incr -notouch $client_IP_addr
+                                #incr getcount
+                                # record of this session exists but request is allowed.
+                        }
+        } else {
+                        log local0. "E- Denying Request for $client_IP_addr : $getcount"
+
+                        table set $client_IP_addr "1" $static::timeout $static::lifetime
+                        table set $X_client_IP_addr $epocNow $static::timeout $static::timeout
+                        HTTP::respond 200  -version 1.1 content "Reseting counters - Allowed: $response\n" Connection "Keep-alive"
+
+                        return
+#                        HTTP::respond 403 -version 1.1 content {
+#                          <html>
+#                          <head><title>HTTP Request denied</title></head>
+#                          <body>Your HTTP requests are being throttled.</body>
+#                          </html>
+#                        }
+#                        return
+        }
+        HTTP::respond 200  -version 1.1 content "Allowed: $response\n" Connection "Keep-alive"
+   # }
+
+        # Throttling part Ends Here.
+
+
+   #}
+}
