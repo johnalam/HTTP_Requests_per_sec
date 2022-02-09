@@ -1,4 +1,4 @@
-# HTTP_Requests_throttling
+# HTTP_Requests_throttling iRule
 Throttle General HTTP requests.  More precise than previous versions.
 
 
