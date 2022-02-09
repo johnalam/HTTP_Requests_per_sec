@@ -1,5 +1,7 @@
-# HTTP_Requests_per_sec
-Gauge General HTTP requests per second.  More precise than previous versions.
+# HTTP_Requests_throttling
+Throttle General HTTP requests.  More precise than previous versions.
 
 
-This version is a complete re-write or the version on Devcentral.  Old version had an issue with accuracy.
+This version is a complete re-write or the version on Devcentral.  Old version accurate to 1 second.
+
+This version has millisecond accuracy.
